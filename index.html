@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d0f12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>探店地图</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{
+    --bg:#0d0f12; --panel:#14171c; --line:#23272e; --line2:#2c313a;
+    --fg:#d6dae0; --dim:#7f868f; --dim2:#5d646d; --accent:#c94f42; --warn:#b08a3c;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font:13px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  #app{display:flex;height:100%}
+  #side{width:312px;flex:0 0 312px;border-right:1px solid var(--line);
+    display:flex;flex-direction:column;background:var(--panel);min-height:0}
+  #map{flex:1}
+  .hd{padding:10px 12px;border-bottom:1px solid var(--line);flex:0 0 auto}
+  .hd h1{margin:0;font-size:13px;font-weight:600;letter-spacing:.5px}
+  .hd .sub{color:var(--dim);font-size:11px;margin-top:3px;font-variant-numeric:tabular-nums}
+
+  /* 搜索固定在顶部,带清空 */
+  #top{flex:0 0 auto;padding:8px 12px;border-bottom:1px solid var(--line)}
+  .qw{position:relative;display:flex;align-items:center}
+  #q{width:100%;background:#0d0f12;border:1px solid var(--line2);color:var(--fg);
+    padding:7px 26px 7px 8px;font-size:12px;border-radius:2px;outline:none}
+  #q:focus{border-color:#3d444f}
+  #qx{position:absolute;right:6px;width:16px;height:16px;line-height:15px;text-align:center;
+    color:var(--dim2);cursor:pointer;font-size:14px;border-radius:2px;display:none}
+  #qx:hover{color:var(--fg);background:#232830}
+  #qx.on{display:block}
+
+  /* 城市快捷 chips:横向滚动,单选为主 */
+  #cbar{display:flex;gap:6px;overflow-x:auto;padding:8px 12px;flex:0 0 auto;
+    border-bottom:1px solid var(--line);-webkit-overflow-scrolling:touch;
+    scrollbar-width:none}
+  #cbar::-webkit-scrollbar{display:none}
+  .chip{flex:0 0 auto;padding:4px 10px;border:1px solid var(--line2);border-radius:12px;
+    color:var(--dim);font-size:12px;cursor:pointer;white-space:nowrap;background:#0f1216}
+  .chip .c{color:var(--dim2);font-size:10px;margin-left:4px;font-variant-numeric:tabular-nums}
+  .chip.on{border-color:var(--accent);color:var(--fg);background:#1e1614}
+  .chip.on .c{color:var(--dim)}
+
+  /* 品类 chips:多选,蓝调区分于城市的红调 */
+  #kbar{display:flex;gap:6px;overflow-x:auto;padding:7px 12px;flex:0 0 auto;
+    border-bottom:1px solid var(--line);-webkit-overflow-scrolling:touch;
+    scrollbar-width:none;align-items:center}
+  #kbar::-webkit-scrollbar{display:none}
+  #kbar .chip.k.on{border-color:#456c8f;color:#a9c8e0;background:#151d26}
+  #kbar .kx{flex:0 0 auto;color:var(--dim2);font-size:10.5px;cursor:pointer;
+    padding:0 2px;display:none}
+  #kbar .kx.on{display:block}
+  #kbar .kx:hover{color:var(--fg)}
+
+  /* 高级筛选:独立面板,不和列表抢高度 */
+  #advbtn{flex:0 0 auto;padding:6px 12px;border-bottom:1px solid var(--line);
+    color:var(--dim);font-size:11px;cursor:pointer;display:flex;
+    justify-content:space-between;align-items:center;user-select:none}
+  #advbtn:hover{color:var(--fg)}
+  #advbtn .n{color:var(--accent)}
+  #adv{position:absolute;left:0;right:0;top:0;bottom:0;background:var(--panel);
+    z-index:20;display:none;flex-direction:column}
+  #adv.open{display:flex}
+  #adv .ah{padding:10px 12px;border-bottom:1px solid var(--line);flex:0 0 auto;
+    display:flex;justify-content:space-between;align-items:center;font-size:12px}
+  #adv .ah .x{color:var(--dim);cursor:pointer;padding:0 4px}
+  #adv .ab{flex:1;min-height:0;overflow-y:auto;padding:4px 12px 12px}
+  #adv .gt{color:var(--dim);font-size:11px;padding:9px 0 4px;
+    display:flex;justify-content:space-between;align-items:center}
+  #adv .gt .op{color:var(--dim2);font-size:10px;cursor:pointer}
+  #adv .gt .op:hover{color:var(--fg)}
+
+  .row{display:flex;align-items:center;gap:7px;padding:3px 0;cursor:pointer}
+  .row input{accent-color:var(--accent);margin:0;flex:0 0 auto}
+  .row .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .c{color:var(--dim);font-variant-numeric:tabular-nums;font-size:11px}
+  .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+
+  /* 列表:唯一伸缩区 */
+  #list{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .item{padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+  .item:hover{background:#191d23}
+  .item.on{background:#1d2229;box-shadow:inset 2px 0 0 var(--accent)}
+  .item .s{font-weight:500;display:flex;gap:5px;align-items:baseline;flex-wrap:wrap}
+  .item .s .nm{flex:1;min-width:0}
+  .item .m{color:var(--dim);font-size:11px;margin-top:2px}
+  .item .a{color:var(--dim2);font-size:11px;margin-top:2px}
+  .tag{padding:0 4px;border:1px solid var(--line2);color:var(--dim);
+    font-size:10px;border-radius:2px;flex:0 0 auto;line-height:15px}
+  .tag.fz{border-color:#5c4420;color:var(--warn)}
+  .tag.ar{border-color:#33404d;color:#6f8ba3}
+  .tag.ng{border-color:#5c2420;color:#c0645c}
+  .tag.vt{border-color:#2f5340;color:#6aa583}
+  .tag.cy{border-color:#4a4030;color:#9c8b62}
+  .tag.ad{border-color:#5c3a20;color:#b5804a}
+  .tag.ct{border-color:#3a4757;color:#8aa6bf}
+  .pin.vote{box-shadow:0 0 0 1px #6aa583}
+  .foot{padding:7px 12px;border-top:1px solid var(--line);color:var(--dim2);
+    font-size:11px;flex:0 0 auto}
+  ::-webkit-scrollbar{width:7px;height:7px}
+  ::-webkit-scrollbar-thumb{background:#2a2f37}
+  ::-webkit-scrollbar-track{background:transparent}
+  .leaflet-container{background:#0d0f12}
+  .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel);color:var(--fg);
+    border-radius:3px;box-shadow:0 2px 14px rgba(0,0,0,.7)}
+  .leaflet-popup-content{margin:9px 11px;font-size:12px;line-height:1.65;min-width:170px}
+  .leaflet-popup-content a{color:#6ba3d6;text-decoration:none}
+  .leaflet-popup-content a:hover{text-decoration:underline}
+  .leaflet-popup-content .t{color:var(--dim);font-size:11px}
+  .leaflet-popup-content .nav{display:inline-block;margin-top:5px;padding:3px 8px;
+    border:1px solid #33404d;border-radius:2px;color:#8fb4d6}
+  .leaflet-popup-close-button{color:var(--dim) !important}
+  .leaflet-bar a{background:var(--panel);color:var(--fg);border-color:var(--line)}
+  .leaflet-bar a:hover{background:#1d2229}
+  .pin{border-radius:50%;border:2px solid #0d0f12;box-sizing:content-box}
+  .pin.area{border-radius:2px;opacity:.8;transform:rotate(45deg)}
+
+  /* 当前店摘要:抽屉关掉也不丢信息 */
+  #cur{display:none}
+
+  #bar{display:none}
+  @media (max-width:760px){
+    html,body{font-size:14px}
+    #app{flex-direction:column}
+    #map{flex:1;min-height:0}
+    #side{position:fixed;left:0;right:0;bottom:0;top:auto;width:100%;flex:none;
+      height:76vh;max-height:76vh;border-right:none;border-top:1px solid var(--line2);
+      border-radius:10px 10px 0 0;z-index:900;overflow:hidden;
+      transform:translateY(calc(100% - 42px));transition:transform .22s ease;
+      box-shadow:0 -6px 22px rgba(0,0,0,.6)}
+    #side.open{transform:translateY(0)}
+    #bar{display:flex;align-items:center;justify-content:space-between;
+      padding:0 14px;height:42px;flex:0 0 42px;cursor:pointer;user-select:none;
+      position:relative}
+    #bar .gr{width:34px;height:4px;border-radius:2px;background:#39404a;
+      position:absolute;left:50%;transform:translateX(-50%);top:7px}
+    #bar .lb{font-size:12px;color:var(--fg);font-weight:600}
+    #bar .ct{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+    .hd{display:none}
+    .row{padding:7px 0}
+    .row input{width:17px;height:17px}
+    .item{padding:11px 12px}
+    .foot{display:none}
+    .leaflet-control-zoom{display:none}
+    .pin{border-width:2px}
+    /* 抽屉收起时,底部显示当前店摘要 */
+    #cur{display:none;position:fixed;left:8px;right:8px;bottom:50px;z-index:880;
+      background:var(--panel);border:1px solid var(--line2);border-radius:6px;
+      padding:8px 10px;box-shadow:0 3px 16px rgba(0,0,0,.6)}
+    #cur.on{display:block}
+    #cur .cs{font-weight:600;font-size:13px;display:flex;gap:5px;align-items:baseline;
+      flex-wrap:wrap}
+    #cur .cs .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+      white-space:nowrap}
+    #cur .cm{color:var(--dim);font-size:11px;margin-top:2px}
+    #cur .cl{display:flex;gap:8px;margin-top:6px}
+    #cur .cl a{flex:1;text-align:center;padding:5px 0;border:1px solid var(--line2);
+      border-radius:3px;color:#8fb4d6;text-decoration:none;font-size:12px}
+    #cur .cx{position:absolute;right:6px;top:4px;color:var(--dim2);cursor:pointer;
+      padding:2px 6px}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="side">
+    <div id="bar"><span class="gr"></span><span class="lb">筛选与列表</span>
+      <span class="ct" id="barct"></span></div>
+    <div class="hd">
+      <h1>探店地图</h1>
+      <div class="sub" id="stat">加载中</div>
+    </div>
+
+    <div id="top">
+      <div class="qw">
+        <input id="q" placeholder="搜店名 / 地址 / UP主">
+        <span id="qx" title="清空">×</span>
+      </div>
+    </div>
+
+    <div id="cbar"></div>
+    <div id="kbar"></div>
+
+    <div id="advbtn"><span>高级筛选 · UP主</span><span class="n" id="advn"></span></div>
+
+    <div id="list"></div>
+    <div class="foot" id="foot"></div>
+
+    <div id="adv">
+      <div class="ah"><span>高级筛选</span><span class="x" id="advx">关闭</span></div>
+      <div class="ab">
+        <div class="gt"><span>条件</span></div>
+        <label class="row"><input type="checkbox" id="fArea" checked>
+          <span class="n">显示区域线索(无门牌)</span></label>
+        <label class="row"><input type="checkbox" id="fExact">
+          <span class="n">仅店名精确匹配</span></label>
+        <label class="row"><input type="checkbox" id="fVote">
+          <span class="n">仅多位UP主推荐(≥2)</span></label>
+        <label class="row"><input type="checkbox" id="fCore">
+          <span class="n">苏州只看市区(排除昆山等)</span></label>
+        <label class="row"><input type="checkbox" id="fAd">
+          <span class="n">隐藏有商单风险的UP</span></label>
+        <div class="gt"><span>UP主</span><span class="op" id="opu">全选/全不选</span></div>
+        <div id="ups"></div>
+      </div>
+    </div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<div id="cur">
+  <span class="cx" id="curx">×</span>
+  <div class="cs"><span class="nm" id="curnm"></span><span id="curtg"></span></div>
+  <div class="cm" id="curm"></div>
+  <div class="cl"><a id="curnav" target="_blank" rel="noopener">高德导航</a>
+    <a id="curvid" target="_blank" rel="noopener">看视频</a></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map',{zoomControl:true,attributionControl:false,tap:true}).setView([34,113],5);
+L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+  {subdomains:'1234',maxZoom:18}).addTo(map);
+
+let DATA=null, markers=new Map(), active=null, colorOf={};
+const selUps=new Set(), selCats=new Set();   // selCats 空 = 品类不限
+let selCity='苏州';   // 城市单选为主,默认苏州
+// 品类固定顺序,高频在前
+const CATORD=['面馆','苏式点心','糕团甜品','中餐馆','小吃摊档','火锅烧烤',
+  '咖啡茶饮','熔食卤味','快餐家常','异国料理','其他','区域'];
+
+fetch('data.json').then(r=>r.json()).then(d=>{DATA=d;init();});
+
+function esc(t){const e=document.createElement('div');e.textContent=t==null?'':t;return e.innerHTML}
+// 多UP交叉推荐数:数据字段是 cross_ups
+function votes(s){return s.cross_ups||s.votes||1}
+function adRisk(s){return !!(s.ad_evidence||s.up_ad_risk)}
+
+function init(){
+  const shops=DATA.shops;
+  DATA.ups.forEach(u=>colorOf[u.name]=u.color);
+
+  const cc={},uc={};
+  shops.forEach(s=>{cc[s.city]=(cc[s.city]||0)+1;uc[s.up]=(uc[s.up]||0)+1});
+  const cities=Object.keys(cc).sort((a,b)=>cc[b]-cc[a]);
+  if(!cc[selCity])selCity=cities[0];
+
+  document.getElementById('cbar').innerHTML=
+    `<span class="chip" data-city="__all">全部<span class="c">${shops.length}</span></span>`+
+    cities.map(c=>`<span class="chip" data-city="${esc(c)}">${esc(c)}<span class="c">${cc[c]}</span></span>`).join('');
+
+  const ups=Object.keys(uc).sort((a,b)=>uc[b]-uc[a]);
+  ups.forEach(u=>selUps.add(u));
+  document.getElementById('ups').innerHTML=ups.map(u=>
+    `<label class="row"><input type="checkbox" data-up="${esc(u)}" checked>
+     <span class="dot" style="background:${colorOf[u]||'#c94f42'}"></span>
+     <span class="n">${esc(u)}</span><span class="c">${uc[u]}</span></label>`).join('');
+
+  document.querySelectorAll('.chip[data-city]').forEach(el=>el.onclick=()=>{
+    selCity=el.dataset.city;syncChips();buildCats();render(true);});   // 切城市后按结果 fitBounds
+  document.querySelectorAll('input[data-up]').forEach(el=>el.onchange=()=>{
+    el.checked?selUps.add(el.dataset.up):selUps.delete(el.dataset.up);render();});
+
+  document.getElementById('opu').onclick=()=>{
+    const els=document.querySelectorAll('input[data-up]');
+    const on=selUps.size<els.length;
+    els.forEach(el=>{el.checked=on;on?selUps.add(el.dataset.up):selUps.delete(el.dataset.up);});
+    render();};
+
+  const q=document.getElementById('q'),qx=document.getElementById('qx');
+  q.oninput=()=>{qx.classList.toggle('on',!!q.value);render();};
+  qx.onclick=()=>{q.value='';qx.classList.remove('on');render();q.focus();};
+
+  ['fArea','fExact','fVote','fCore','fAd'].forEach(id=>
+    document.getElementById(id).onchange=()=>render());
+
+  const adv=document.getElementById('adv');
+  document.getElementById('advbtn').onclick=()=>adv.classList.add('open');
+  document.getElementById('advx').onclick=()=>adv.classList.remove('open');
+
+  const side=document.getElementById('side');
+  document.getElementById('bar').onclick=()=>side.classList.toggle('open');
+  document.getElementById('curx').onclick=()=>
+    document.getElementById('cur').classList.remove('on');
+
+  shops.forEach((s,i)=>{
+    s._i=i;
+    const area=s.kind==='区域', c=colorOf[s.up]||'#c94f42';
+    const vt=votes(s)>=2&&!area;
+    const m=L.marker([s.lat,s.lng],{icon:L.divIcon({className:'',
+      html:`<div class="pin${area?' area':''}${vt?' vote':''}" style="width:${area?8:11}px;height:${area?8:11}px;background:${c}"></div>`,
+      iconSize:area?[8,8]:[11,11],iconAnchor:area?[4,4]:[6,6]})});
+    m.bindPopup(
+      `<b>${esc(s.matched)}</b>${badges(s)}<br>`+
+      (s.shop!==s.matched?`<span class="t">视频里叫「${esc(s.shop)}」</span><br>`:'')+
+      `<span class="t">${esc(s.address)}</span><br>`+
+      `<span class="t">${esc(s.up)} · ${esc(s.city)}${s.district?' '+esc(s.district):''}</span><br>`+
+      `<a href="${s.url}" target="_blank" rel="noopener">▸ ${esc(s.title.slice(0,34))}</a><br>`+
+      `<a class="nav" href="${navUrl(s)}" target="_blank" rel="noopener">高德导航</a>`);
+    m.on('click',()=>focus(i,false));
+    markers.set(i,m);
+  });
+  syncChips();
+  buildCats();
+  render(true);
+}
+
+// 品类胶囊:多选,计数跟当前城市联动;当前城市没的品类不显示
+function buildCats(){
+  const pool=DATA.shops.filter(s=>selCity==='__all'||s.city===selCity);
+  const cc={};pool.forEach(s=>{const k=s.cat||'其他';cc[k]=(cc[k]||0)+1});
+  [...selCats].forEach(c=>{if(!cc[c])selCats.delete(c)});   // 避免筛出空结果
+  document.getElementById('kbar').innerHTML=
+    CATORD.filter(c=>cc[c]).map(c=>
+      `<span class="chip k${selCats.has(c)?' on':''}" data-k="${esc(c)}">${esc(c)}<span class="c">${cc[c]}</span></span>`).join('')+
+    `<span class="kx${selCats.size?' on':''}" id="kx">清空</span>`;
+  document.querySelectorAll('.chip[data-k]').forEach(el=>el.onclick=()=>{
+    const k=el.dataset.k;
+    selCats.has(k)?selCats.delete(k):selCats.add(k);
+    el.classList.toggle('on',selCats.has(k));
+    document.getElementById('kx').classList.toggle('on',selCats.size>0);
+    render(true);});
+  document.getElementById('kx').onclick=()=>{selCats.clear();buildCats();render(true);};
+}
+
+// 高德网页版导航:带坐标和名称,手机上会唤起高德 App
+function navUrl(s){
+  return 'https://uri.amap.com/marker?position='+s.lng+','+s.lat+
+         '&name='+encodeURIComponent(s.matched||s.shop)+'&src=tandian&coordinate=gaode';
+}
+
+function syncChips(){
+  document.querySelectorAll('.chip[data-city]').forEach(el=>
+    el.classList.toggle('on',el.dataset.city===selCity));
+}
+
+function badges(s){
+  let h='';
+  if(s.cat&&s.cat!=='区域'&&s.cat!=='其他') h+=`<span class="tag ct">${esc(s.cat)}</span>`;
+  if(s.kind==='区域') h+=`<span class="tag ar">区域</span>`;
+  else if(!s.exact) h+=`<span class="tag fz">近似</span>`;
+  if(votes(s)>=2) h+=`<span class="tag vt">${votes(s)}人推荐</span>`;
+  if(s.scope==='代管县市') h+=`<span class="tag cy">县市</span>`;
+  if(adRisk(s)) h+=`<span class="tag ad">商单风险</span>`;
+  if(s.sentiment==='负面') h+=`<span class="tag ng">差评</span>`;
+  return h?' '+h:'';
+}
+
+function visible(){
+  const q=document.getElementById('q').value.trim().toLowerCase();
+  const showArea=document.getElementById('fArea').checked;
+  const onlyExact=document.getElementById('fExact').checked;
+  const onlyVote=document.getElementById('fVote').checked;
+  const onlyCore=document.getElementById('fCore').checked;
+  const hideAd=document.getElementById('fAd').checked;
+  return DATA.shops.filter(s=>{
+    if(selCity!=='__all'&&s.city!==selCity)return false;
+    if(selCats.size&&!selCats.has(s.cat||'其他'))return false;
+    if(!selUps.has(s.up))return false;
+    if(!showArea&&s.kind==='区域')return false;
+    if(onlyExact&&!s.exact)return false;
+    if(onlyVote&&votes(s)<2)return false;
+    if(onlyCore&&s.scope==='代管县市')return false;
+    if(hideAd&&adRisk(s))return false;
+    if(q&&!(s.shop+s.matched+s.address+s.up).toLowerCase().includes(q))return false;
+    return true;
+  });
+}
+
+function render(fit){
+  const vis=visible(), ids=new Set(vis.map(s=>s._i));
+  markers.forEach((m,i)=>{const on=ids.has(i);
+    if(on&&!map.hasLayer(m))m.addTo(map);
+    if(!on&&map.hasLayer(m))map.removeLayer(m);});
+
+  const nShop=vis.filter(s=>s.kind==='店').length;
+  const nVote=new Set(vis.filter(s=>votes(s)>=2).map(s=>s.shop)).size;
+  document.getElementById('stat').textContent=
+    `${vis.length} / ${DATA.shops.length} 条  ·  门店 ${nShop}  ·  多人推荐 ${nVote}  ·  UP主 ${DATA.ups.length}`;
+  document.getElementById('barct').textContent=
+    `${selCity==='__all'?'全部':selCity}${selCats.size?' · '+[...selCats].join('/'):''} · ${vis.length} 条 · 门店 ${nShop}`;
+
+  const els=document.querySelectorAll('input[data-up]').length;
+  const nf=[...document.querySelectorAll('#adv input[type=checkbox]')]
+    .filter(el=>el.id&&el.id!=='fArea'&&el.checked).length
+    +(document.getElementById('fArea').checked?0:1)
+    +(selUps.size<els?1:0);
+  document.getElementById('advn').textContent=nf?nf+' 项生效':'';
+
+  document.getElementById('list').innerHTML=vis.map(s=>
+    `<div class="item${active===s._i?' on':''}" data-i="${s._i}">
+       <div class="s"><span class="nm">${esc(s.matched)}</span>${badges(s)}</div>
+       <div class="m">${esc(s.city)}${s.district?' '+esc(s.district):''} · ${esc(s.up)}</div>
+       <div class="a">${esc(s.address)}</div>
+     </div>`).join('')||'<div class="item"><span class="m">没有符合条件的店,试着取消几个筛选</span></div>';
+  document.querySelectorAll('.item[data-i]').forEach(el=>
+    el.onclick=()=>focus(+el.dataset.i,true));
+
+  document.getElementById('foot').textContent=
+    '绿圈/「N人推荐」= 多位UP主独立推荐,可信度最高;「近似」= 高德名与视频叫法不一致;「区域」= 仅街区线索;「县市」= 苏州代管的昆山常熟等;「商单风险」= 该UP有赞助/受邀实锤';
+
+  if(fit&&vis.length)map.fitBounds(vis.map(s=>[s.lat,s.lng]),{padding:[45,45],maxZoom:15});
+}
+
+function focus(i,pan){
+  active=i;const s=DATA.shops[i];
+  if(pan)map.setView([s.lat,s.lng],Math.max(map.getZoom(),16));
+  markers.get(i).openPopup();
+  if(window.innerWidth<=760){
+    document.getElementById('side').classList.remove('open');
+    // 抽屉收起后仍保留当前店摘要,信息不丢
+    document.getElementById('curnm').textContent=s.matched;
+    document.getElementById('curtg').innerHTML=badges(s);
+    document.getElementById('curm').textContent=
+      (s.city||'')+(s.district?' '+s.district:'')+' · '+(s.up||'')+
+      (s.address?' · '+s.address:'');
+    document.getElementById('curnav').href=navUrl(s);
+    document.getElementById('curvid').href=s.url;
+    document.getElementById('cur').classList.add('on');
+  }
+  document.querySelectorAll('.item[data-i]').forEach(el=>
+    el.classList.toggle('on',+el.dataset.i===i));
+}
+</script>
+</body>
+</html>
